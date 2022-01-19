@@ -1,7 +1,7 @@
 from bluepy import btle
-import paho.mqtt.client as mqtt
 from time import sleep
-import binascii
+import binascii,json
+import pika
 
 class XiaoMiTemp(btle.DefaultDelegate):
     def __init__(self,client,deviceid,location):
@@ -19,37 +19,50 @@ class XiaoMiTemp(btle.DefaultDelegate):
         temp = int.from_bytes(databytes[0:2],"little")/100
         humid = int.from_bytes(databytes[2:3],"little")
         battery = int.from_bytes(databytes[3:5],"little")/1000
-        data1 = "{},location={} temperature={}".format(self.DEVICEID,self.LOC,temp)
-        data2 = "{},location={} humidity={}".format(self.DEVICEID,self.LOC,humid)
-        data3 = "{},location={} battery={}".format(self.DEVICEID,self.LOC,battery)
-        print(data1)
-        print(data2)
-        print(data3)
-        client.publish("sensors/{}".format(DEVICEID),data1)
-        client.publish("sensors/{}".format(DEVICEID),data2)
-        client.publish("sensors/{}".format(DEVICEID),data3)
+        data = {
+            "id": self.DEVICEID,
+            "data": [
+                {
+                    "name": "temp",
+                    "value": temp
+                },
+                {
+                    "name": "humid",
+                    "value": humid
+                },
+                {
+                    "name": "batt",
+                    "value": battery
+                },
+                {
+                    "name": "loc",
+                    "value": self.LOC
+                }
+            ]
+        }
+        print(json.dumps(data))
+        channel.basic_publish(exchange='',
+                        routing_key='upload',
+                        body=json.dumps(data)
+                        )
 
-def on_connect(client, userdata, flags, rc):
-    print("Connected with result code "+str(rc))
-
-DEVICEID="Xiaomi"
-LOC="7736"
-
-client = mqtt.Client()
-client.on_connect = on_connect
+DEVICEID="xiaomi-01"
+LOC=[
+        13.7903309,
+        100.3770453
+    ]
 
 try:
-    client.connect("180.180.242.94",1883,60)
+    connection = pika.BlockingConnection(pika.ConnectionParameters('localhost'))
+    channel = connection.channel()
 except Exception as e:
     print(e)
 
 # Initialisation  -------
 address="A4:C1:38:D7:8D:90"
 p = btle.Peripheral( )
-p.setDelegate( XiaoMiTemp(client,DEVICEID,LOC) )
+p.setDelegate( XiaoMiTemp(channel,DEVICEID,LOC) )
 
-# start MQTT loop
-client.loop_start()
 
 try:
     p.connect(address)
@@ -57,5 +70,5 @@ try:
 except Exception as e:
     print(e)
 finally:
-    client.disconnect()
+    connection.close()
     p.disconnect()
